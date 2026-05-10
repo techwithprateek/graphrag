@@ -18,6 +18,113 @@ Standard RAG splits documents into chunks, embeds them, and retrieves the most s
 
 ---
 
+## 🏗️ System Architecture
+
+```mermaid
+graph TB
+    subgraph User["👤 User"]
+        Browser["🌐 Browser\nlocalhost:8501"]
+    end
+
+    subgraph Frontend["🖥️ Frontend — Streamlit (port 8501)"]
+        UI["app.py\n─────────────\n• Health check on load\n• 3-column layout\n• Example question buttons\n• agraph canvas\n• Session state"]
+    end
+
+    subgraph Backend["🔙 Backend — FastAPI (port 8000)"]
+        direction TB
+        Main["main.py\nFastAPI + CORS"]
+        RouteQ["routes/query.py\nPOST /api/query"]
+        RouteS["routes/schema.py\nGET /api/schema\nGET /api/examples\nGET /health"]
+        LLM["services/llm_service.py\n─────────────\ngenerate_cypher()\nsynthesize_answer()"]
+        Neo4jSvc["services/neo4j_service.py\n─────────────\nrun_cypher()\nbuild_graph_data()\nget_schema()"]
+        Prompt["prompts/cypher_prompt.py\n─────────────\nSystem prompt\nFew-shot examples"]
+
+        Main --> RouteQ
+        Main --> RouteS
+        RouteQ --> LLM
+        RouteQ --> Neo4jSvc
+        LLM --> Prompt
+    end
+
+    subgraph External["☁️ External Services"]
+        OpenAI["🤖 OpenAI GPT-4o"]
+        Neo4j["🗄️ Neo4j AuraDB"]
+        TMDB["🎬 TMDB API"]
+    end
+
+    subgraph Seed["🌱 Seed Script"]
+        SeedScript["seed/load_tmdb.py\nFetch → Extract → Load"]
+    end
+
+    Browser -->|"HTTP"| UI
+    UI -->|"httpx POST /api/query"| Main
+    UI -->|"httpx GET /api/health\n/schema · /examples"| Main
+    LLM -->|"Chat Completions API"| OpenAI
+    Neo4jSvc -->|"Async Cypher"| Neo4j
+    SeedScript -->|"Fetch movies"| TMDB
+    SeedScript -->|"MERGE nodes & rels"| Neo4j
+
+    style Frontend fill:#e8f5e9,stroke:#2e7d32
+    style Backend fill:#fff3e0,stroke:#e65100
+    style External fill:#fce4ec,stroke:#c62828
+    style Seed fill:#e8eaf6,stroke:#3949ab
+```
+
+---
+
+## 🔄 Request Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant ST as 🖥️ Streamlit
+    participant FA as 🔙 FastAPI
+    participant LLM as 🤖 GPT-4o
+    participant N4J as 🗄️ Neo4j AuraDB
+
+    User->>ST: Types question & clicks Ask
+    ST->>FA: POST /api/query {"question": "..."}
+    FA->>LLM: System prompt + schema + question
+    Note over LLM: Generates Cypher query
+    LLM-->>FA: "MATCH (p:Person)..."
+    FA->>N4J: Execute Cypher (async)
+    Note over N4J: Graph traversal — walks edges
+    N4J-->>FA: Raw records (nodes + relationships)
+    FA->>FA: build_graph_data(records)
+    FA->>LLM: Question + Cypher + raw results
+    Note over LLM: Synthesizes conversational answer
+    LLM-->>FA: Natural language answer
+    FA-->>ST: {answer, cypher, graph_data, meta}
+    ST-->>User: Live graph + Answer + Cypher
+```
+
+---
+
+## 🗄️ Graph Schema
+
+```mermaid
+graph LR
+    Person["🧑 Person\n──────\nname · born"]
+    Movie["🎬 Movie\n──────\ntitle · year\ntagline · revenue · rating"]
+    Genre["🎭 Genre\n──────\nname"]
+    Studio["🏢 Studio\n──────\nname"]
+
+    Person -->|"ACTED_IN {roles}"| Movie
+    Person -->|"DIRECTED"| Movie
+    Person -->|"WROTE"| Movie
+    Movie -->|"IN_GENRE"| Genre
+    Movie -->|"PRODUCED_BY"| Studio
+
+    style Person fill:#7F77DD,color:#fff,stroke:#5a52b0
+    style Movie fill:#E8593C,color:#fff,stroke:#b03a1e
+    style Genre fill:#1D9E75,color:#fff,stroke:#117a55
+    style Studio fill:#BA7517,color:#fff,stroke:#8a5510
+```
+
+> 📄 Full architecture details (all 5 diagrams) in [ARCHITECTURE.md](./ARCHITECTURE.md)
+
+---
+
 ## ✨ Features
 
 - 🔍 **Natural language → Cypher** — GPT-4o generates Cypher queries from plain English
